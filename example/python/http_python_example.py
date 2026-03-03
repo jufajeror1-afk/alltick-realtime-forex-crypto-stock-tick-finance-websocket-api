@@ -21,22 +21,99 @@ Encode the following JSON and copy it to the "query" field of the HTTP query str
 {"trace": "python_http_test2", "data": {"symbol_list": [{"code": "700.HK"}, {"code": "UNH.US"}]}}
 {"trace": "python_http_test3", "data": {"symbol_list": [{"code": "700.HK"}, {"code": "UNH.US"}]}}
 '''
-test_url1 = 'https://quote.alltick.co/quote-stock-b-api/kline?token=testtoken&query=%7B%22trace%22%20%3A%20%22python_http_test1%22%2C%22data%22%20%3A%20%7B%22code%22%20%3A%20%22700.HK%22%2C%22kline_type%22%20%3A%201%2C%22kline_timestamp_end%22%20%3A%200%2C%22query_kline_num%22%20%3A%202%2C%22adjust_type%22%3A%200%7D%7D'
-test_url2 = 'https://quote.alltick.co/quote-stock-b-api/depth-tick?token=testtoken&query=%7B%22trace%22%20%3A%20%22python_http_test2%22%2C%22data%22%20%3A%20%7B%22symbol_list%22%3A%20%5B%7B%22code%22%3A%20%22700.HK%22%7D%2C%7B%22code%22%3A%20%22UNH.US%22%7D%5D%7D%7D'
-test_url3 = 'https://quote.alltick.co/quote-stock-b-api/trade-tick?token=testtoken&query=%7B%22trace%22%20%3A%20%22python_http_test3%22%2C%22data%22%20%3A%20%7B%22symbol_list%22%3A%20%5B%7B%22code%22%3A%20%22700.HK%22%7D%2C%7B%22code%22%3A%20%22UNH.US%22%7D%5D%7D%7D'
+# Ask the user for their API token; prompt if not provided via environment
+api_token = input('请输入您的API_KEY (token): ').strip()
+if not api_token:
+    raise ValueError('API_KEY不能为空')
+
+# prepare example URLs using the user token and querying a foreign option contract
+# (the API treats options like any other symbol code)
+# prompt for a symbol so you can test with different contracts
+OPTION_CODE = input('请输入期权合约代码（例如 AAPL230918C00150000），按回车默认使用 AAPL.US: ').strip()
+if not OPTION_CODE:
+    print('未输入期权代码，将使用默认现货 AAPL.US 进行测试')
+    OPTION_CODE = 'AAPL.US'
+
+base = 'https://quote.alltick.co/quote-stock-b-api'
+
+# prepare three queries with the chosen code
+query1 = '{"trace":"python_http_test1","data":{"code":"' + OPTION_CODE + '","kline_type":1,"kline_timestamp_end":0,"query_kline_num":2,"adjust_type":0}}'
+test_url1 = f"{base}/kline?token={api_token}&query={requests.utils.quote(query1)}"
+
+query2 = '{"trace":"python_http_test2","data":{"symbol_list":[{"code":"' + OPTION_CODE + '"}]}}'
+query3 = '{"trace":"python_http_test3","data":{"symbol_list":[{"code":"' + OPTION_CODE + '"}]}}'
+# URL-encode queries using requests.utils.quote for safety
+encoded2 = requests.utils.quote(query2)
+encoded3 = requests.utils.quote(query3)
+
+
+test_url2 = f"{base}/depth-tick?token={api_token}&query={encoded2}"
+
+test_url3 = f"{base}/trade-tick?token={api_token}&query={encoded3}"
 
 resp1 = requests.get(url=test_url1, headers=test_headers)
-time.sleep(1)
+# pause ten seconds between each call to avoid rate limiting
+time.sleep(10)
 resp2 = requests.get(url=test_url2, headers=test_headers)
-time.sleep(1)
+
+# another ten‑second delay before the next request
+time.sleep(10)
 resp3 = requests.get(url=test_url3, headers=test_headers)
 
-# Decoded text returned by the request
-text1 = resp1.text
-print(text1)
+# we define the output columns you requested and format a row per response
+columns = [
+    "contractID",
+    "symbol",
+    "expiration",
+    "strike",
+    "type",
+    "last",
+    "mark",
+    "bid",
+    "bid_size",
+    "ask",
+    "ask_size",
+    "volume",
+    "open_intel",  # note: might appear as open_int or open_intel in data
+    "date",
+    "implied_vc",
+    "delta",
+    "gamma",
+    "theta",
+    "vega",
+    "rho"
+]
 
-text2 = resp2.text
-print(text2)
+for idx, resp in enumerate((resp1, resp2, resp3), start=1):
+    try:
+        data = resp.json()
+    except ValueError:
+        print(f"response {idx} not JSON:\n{resp.text}")
+        continue
 
-text3 = resp3.text
-print(text3)
+    print(f"\n--- response {idx} ---")
+
+    # flattened dict to search both top-level and inside data
+    flat = {}
+    if isinstance(data, dict):
+        flat.update(data)
+        if isinstance(data.get('data'), dict):
+            flat.update(data['data'])
+
+    # assemble row according to columns list
+    row = {}
+    for col in columns:
+        # try direct key, also allow mapping open_intel←open_int
+        if col in flat:
+            row[col] = flat[col]
+        elif col == 'open_intel' and 'open_int' in flat:
+            row[col] = flat['open_int']
+        else:
+            row[col] = None
+
+    # print row with types
+    for col, val in row.items():
+        print(f"{col} ({type(val).__name__}): {val}")
+
+    # also show complete object for debugging
+    print(f"full object: {data}")

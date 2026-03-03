@@ -17,7 +17,12 @@ import websocket    # pip install websocket-client
 class Feed(object):
 
     def __init__(self):
-        self.url = 'wss://quote.alltick.co/quote-stock-b-ws-api?token=testtoken'  # Enter your websocket URL here
+        # prompt for token and symbol
+        token = input('请输入您的API_KEY (token): ').strip()
+        if not token:
+            raise ValueError('API_KEY不能为空')
+        self.option = input('请输入期权合约代码，例如 AAPL230918C00150000，空则使用 AAPL.US: ').strip() or 'AAPL.US'
+        self.url = f'wss://quote.alltick.co/quote-stock-b-ws-api?token={token}'
         self.ws = None
 
     def on_open(self, ws):
@@ -28,21 +33,14 @@ class Feed(object):
         """
         print('A new WebSocketApp is opened!')
 
-        # Start subscribing (an example)
+        # subscribe to depth/tick for the selected option
         sub_param = {
-            "cmd_id": 22002,
+            "cmd_id": 22002,  # depth quote
             "seq_id": 123,
-            "trace":"3baaa938-f92c-4a74-a228-fd49d5e2f8bc-1678419657806",
-            "data":{
-                "symbol_list":[
-                    {
-                        "code": "700.HK",
-                        "depth_level": 5,
-                    },
-                    {
-                        "code": "UNH.US",
-                        "depth_level": 5,
-                    }
+            "trace": "subscribe-option",
+            "data": {
+                "symbol_list": [
+                    {"code": self.option, "depth_level": 5}
                 ]
             }
         }
@@ -63,14 +61,31 @@ class Feed(object):
 
     def on_message(self, ws, message):
         """
-        Callback object which is called when received data.
-        2 arguments:
-        @ ws: the WebSocketApp object
-        @ message: utf-8 data received from the server
+        Called when a text message is received; parse JSON and display columns.
         """
-        # Parse the received message
-        result = eval(message)
-        print(result)
+        try:
+            data = json.loads(message)
+        except Exception:
+            print('非JSON消息：', message)
+            return
+        # define columns same as HTTP script
+        cols = [
+            "contractID","symbol","expiration","strike","type","last","mark",
+            "bid","bid_size","ask","ask_size","volume","open_intel","date",
+            "implied_vc","delta","gamma","theta","vega","rho"
+        ]
+        flat = {}
+        if isinstance(data, dict):
+            flat.update(data)
+            if isinstance(data.get('data'), dict):
+                flat.update(data['data'])
+        row = {c: flat.get(c) or (flat.get('open_int') if c=='open_intel' else None) for c in cols}
+        # print row
+        print('行情更新:')
+        for c, v in row.items():
+            print(f"  {c}: {v} ({type(v).__name__})")
+        # optionally also dump raw
+        #print('raw', data)
 
     def on_error(self, ws, error):
         """
@@ -110,11 +125,10 @@ class Feed(object):
                 heartbeat = {
                     "cmd_id":22000,
                     "seq_id":123,
-                    "trace":"asdfsdfa",
-                    "data":{
-                    }
+                    "trace":"heartbeat",
+                    "data":{}
                 }
-                self.ws.send(heartbeat)  # 发送心跳消息
+                self.ws.send(json.dumps(heartbeat))  # 发送心跳消息
                 print("Sent heartbeat")
 
 
